@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEXUS AI — Market Intelligence</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root{--bg:#080d17;--panel:#101827;--panel2:#0c1421;--line:#202d40;--text:#e8eef8;--muted:#8fa0b8;--green:#2dd4a0;--red:#ff657a;--blue:#69a7ff;--gold:#f6c66a}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -20%,#152844 0%,var(--bg) 55%);color:var(--text);font:14px Inter,system-ui,Segoe UI,Arial,sans-serif}
+header{height:68px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 26px;background:#0a1220d9;position:sticky;top:0;z-index:5;backdrop-filter:blur(12px)}
+.brand{display:flex;align-items:center;gap:12px;font-weight:800;letter-spacing:2px}.logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#62a8ff,#8a6cff);display:grid;place-items:center;color:#07101d;font-weight:900}.brand small{display:block;color:var(--muted);font-size:9px;letter-spacing:3px;margin-top:2px}
+.status{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px}.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 12px var(--green)}
+main{max-width:1500px;margin:auto;padding:24px}.topline{display:flex;justify-content:space-between;align-items:end;margin-bottom:20px;gap:15px}.eyebrow{color:var(--blue);font-size:10px;letter-spacing:2px;font-weight:700}.topline h1{font-size:25px;margin:6px 0 0}.sub{color:var(--muted);font-size:12px}.controls{display:flex;gap:8px;flex-wrap:wrap}select,button{background:#152237;border:1px solid #2a3a52;color:var(--text);padding:10px 13px;border-radius:8px;font:inherit}button{cursor:pointer}button:hover{border-color:var(--blue)}button.primary{background:#316fe0;border-color:#316fe0}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}.card{background:linear-gradient(145deg,#121e30,#0e1725);border:1px solid var(--line);border-radius:12px;padding:16px;min-width:0}.metric-label{color:var(--muted);font-size:11px}.metric{font-size:22px;font-weight:750;margin-top:9px;letter-spacing:-.5px}.change{font-size:11px;margin-top:5px}.up{color:var(--green)}.down{color:var(--red)}
+.layout{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(290px,.8fr);gap:14px}.chart-card{padding:16px}.section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.section-head h2{font-size:14px;margin:0}.pills{display:flex;gap:5px}.pill{padding:6px 9px;font-size:11px;border-radius:6px;background:#17253a;color:var(--muted);border:1px solid transparent}.pill.active{color:#fff;border-color:#3a73c9;background:#1b3150}
+#chart{height:380px;width:100%}.indicator-row{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:12px}.indicator{background:#0b1422;border:1px solid var(--line);border-radius:8px;padding:11px}.indicator span{display:block;color:var(--muted);font-size:10px}.indicator b{display:block;margin-top:6px;font-size:16px}
+.side{display:flex;flex-direction:column;gap:14px}.watchlist{width:100%;border-collapse:collapse;margin-top:8px}.watchlist td{padding:11px 3px;border-bottom:1px solid #1c293b;font-size:12px}.watchlist tr:last-child td{border:0}.coin{font-weight:700}.muted{color:var(--muted)}.right{text-align:right}
+.signal{border:1px solid var(--line);background:#0b1422;border-radius:9px;padding:12px;margin-top:9px}.signal b{font-size:12px}.signal p{color:var(--muted);font-size:11px;line-height:1.5;margin:6px 0 0}.signal-tag{float:right;font-size:9px;padding:4px 6px;border-radius:5px;background:#183d37;color:var(--green)}
+.alert-form{display:flex;gap:7px;margin-top:10px}.alert-form input{min-width:0;width:100%;background:#0b1422;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:10px}.alert-list{font-size:11px;color:var(--muted);line-height:1.7;margin-top:9px}
+.footer{margin-top:16px;color:#71829b;font-size:10px;line-height:1.6;text-align:center}.toast{position:fixed;right:20px;bottom:20px;background:#163b35;border:1px solid #277b68;padding:12px 16px;border-radius:9px;display:none;z-index:10}
+@media(max-width:900px){.layout{grid-template-columns:1fr}.grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:560px){header{padding:0 14px}main{padding:15px}.topline{align-items:start;flex-direction:column}.grid{gap:8px}.metric{font-size:19px}#chart{height:300px}.indicator-row{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<header><div class="brand"><div class="logo">N</div><div>NEXUS AI<small>INTELLIGENT MARKET SYSTEMS</small></div></div><div class="status"><span class="dot" id="statusDot"></span><span id="connection">Conectando al mercado…</span></div></header>
+<main>
+ <div class="topline"><div><div class="eyebrow">MARKET INTELLIGENCE / LIVE TERMINAL</div><h1>Panel de mercado</h1><div class="sub">Datos públicos de mercado · Motor de señales basado en reglas</div></div><div class="controls"><select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option><option>BNBUSDT</option><option>XRPUSDT</option><option>ADAUSDT</option></select><select id="interval"><option value="1m">1 minuto</option><option value="5m" selected>5 minutos</option><option value="15m">15 minutos</option><option value="1h">1 hora</option><option value="4h">4 horas</option></select><button id="refresh">Reconectar</button></div></div>
+ <section class="grid">
+  <div class="card"><div class="metric-label">PRECIO</div><div class="metric" id="price">—</div><div class="change" id="priceChange">Esperando datos</div></div>
+  <div class="card"><div class="metric-label">CAMBIO 24H</div><div class="metric" id="change24">—</div><div class="change muted">Variación porcentual</div></div>
+  <div class="card"><div class="metric-label">VOLUMEN 24H (USDT)</div><div class="metric" id="volume24">—</div><div class="change muted">Volumen reportado por exchange</div></div>
+  <div class="card"><div class="metric-label">ESTADO DEL MOTOR</div><div class="metric" id="engineState">ACTIVO</div><div class="change up">Análisis local en navegador</div></div>
+ </section>
+ <div class="layout">
+  <section class="card chart-card"><div class="section-head"><h2 id="chartTitle">BTCUSDT · Velas</h2><div class="pills"><span class="pill active">VELAS</span><span class="pill">EMA 20</span><span class="pill">EMA 50</span></div></div><div id="chart"></div><div class="indicator-row"><div class="indicator"><span>RSI (14)</span><b id="rsi">—</b></div><div class="indicator"><span>EMA 20</span><b id="ema20">—</b></div><div class="indicator"><span>EMA 50</span><b id="ema50">—</b></div></div></section>
+  <aside class="side">
+   <section class="card"><div class="section-head"><h2>Watchlist</h2><span class="muted">USDT</span></div><table class="watchlist" id="watchlist"><tr><td class="muted">Cargando mercados…</td></tr></table></section>
+   <section class="card"><div class="section-head"><h2>Motor de señales</h2><span class="muted">RULES v1</span></div><div id="signals"><div class="signal"><b>Analizando mercado</b><p>Las señales aparecerán cuando haya suficientes velas para calcular los indicadores.</p></div></div></section>
+   <section class="card"><div class="section-head"><h2>Crear alerta de precio</h2></div><div class="sub">Aviso local cuando el precio cruce el nivel elegido. Mantener esta pestaña abierta.</div><div class="alert-form"><select id="condition"><option value="above">Mayor que</option><option value="below">Menor que</option></select><input id="target" type="number" step="any" placeholder="Precio objetivo"></div><button class="primary" id="addAlert" style="width:100%;margin-top:8px">Crear alerta</button><div id="alertList" class="alert-list">No hay alertas configuradas.</div></section>
+  </aside>
+ </div>
+ <div class="footer">NEXUS AI es una demostración técnica. No constituye asesoramiento financiero ni ejecuta operaciones. Los datos proceden de endpoints públicos de Binance. Las señales son reglas ilustrativas, no predicciones.</div>
+</main><div class="toast" id="toast"></div>
+<script>
+const $=id=>document.getElementById(id);
+let chart, candleSeries, ema20Series, ema50Series, socket, currentSymbol='BTCUSDT', currentInterval='5m', candles=[], alerts=[], tickerSocket;
+const fmt=n=>Number(n).toLocaleString('en-US',{maximumFractionDigits:n<1?6:2});
+function toast(msg){$('toast').textContent=msg;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',3500)}
+function initChart(){
+ const el=$('chart'); chart=LightweightCharts.createChart(el,{width:el.clientWidth,height:el.clientHeight,layout:{background:{color:'#101827'},textColor:'#91a2ba'},grid:{vertLines:{color:'#1b293b'},horzLines:{color:'#1b293b'}},rightPriceScale:{borderColor:'#26364c'},timeScale:{borderColor:'#26364c',timeVisible:true},crosshair:{mode:1}});
+ candleSeries=chart.addCandlestickSeries({upColor:'#2dd4a0',downColor:'#ff657a',borderUpColor:'#2dd4a0',borderDownColor:'#ff657a',wickUpColor:'#2dd4a0',wickDownColor:'#ff657a'});
+ ema20Series=chart.addLineSeries({color:'#69a7ff',lineWidth:1,priceLineVisible:false});ema50Series=chart.addLineSeries({color:'#f6c66a',lineWidth:1,priceLineVisible:false});
+ new ResizeObserver(()=>chart.applyOptions({width:el.clientWidth})).observe(el);
+}
+function ema(values,period){let k=2/(period+1),out=[],prev=null;values.forEach((v,i)=>{prev=prev===null?v:v*k+prev*(1-k);if(i>=period-1)out.push({index:i,value:prev})});return out}
+function rsi(values,p=14){if(values.length<=p)return null;let ag=0,al=0;for(let i=1;i<=p;i++){const d=values[i]-values[i-1];if(d>0)ag+=d;else al-=d}ag/=p;al/=p;for(let i=p+1;i<values.length;i++){const d=values[i]-values[i-1];ag=(ag*(p-1)+(d>0?d:0))/p;al=(al*(p-1)+(d<0?-d:0))/p}return al===0?(ag===0?50:100):100-100/(1+ag/al)}
+function updateIndicators(){
+ const closes=candles.map(c=>c.close),e20=ema(closes,20),e50=ema(closes,50),toLine=a=>a.map(x=>({time:candles[x.index].time,value:x.value}));
+ ema20Series.setData(toLine(e20));ema50Series.setData(toLine(e50));
+ const rv=rsi(closes);$('rsi').textContent=rv===null?'—':rv.toFixed(1);$('ema20').textContent=e20.length?fmt(e20.at(-1).value):'—';$('ema50').textContent=e50.length?fmt(e50.at(-1).value):'—';
+ const sig=[];if(rv!==null){if(rv<30)sig.push(['RSI en sobreventa','RSI por debajo de 30. No implica reversión garantizada.','WATCH']);if(rv>70)sig.push(['RSI en sobrecompra','RSI por encima de 70. Puede persistir en tendencias fuertes.','WATCH']);if(e20.length&&e50.length){if(e20.at(-1).value>e50.at(-1).value)sig.push(['Sesgo EMA positivo','EMA 20 por encima de EMA 50.','BULLISH']);else sig.push(['Sesgo EMA negativo','EMA 20 por debajo de EMA 50.','BEARISH'])}}
+ $('signals').innerHTML=sig.length?sig.map(s=>`<div class="signal"><span class="signal-tag">${s[2]}</span><b>${s[0]}</b><p>${s[1]}</p></div>`).join(''):'<div class="signal"><b>Reuniendo datos</b><p>Se necesitan más velas para generar señales.</p></div>';
+}
+const REST_HOSTS=['https://data-api.binance.vision','https://api.binance.com','https://api1.binance.com'],WS_HOSTS=['wss://data-stream.binance.vision','wss://stream.binance.com:9443'];
+let restHost=0,wsHost=0,runId=0;const ticks={},WATCH=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT'];
+async function fetchKlines(){let last;for(let n=0;n<REST_HOSTS.length;n++){const idx=(restHost+n)%REST_HOSTS.length;try{const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),8000);const res=await fetch(`${REST_HOSTS[idx]}/api/v3/klines?symbol=${currentSymbol}&interval=${currentInterval}&limit=250`,{signal:ctl.signal});clearTimeout(t);if(res.ok){restHost=idx;return await res.json()}last=new Error('Binance respondió '+res.status)}catch(e){last=e}}throw new Error('No se pudo cargar el histórico ('+((last&&last.message)||'sin respuesta')+'). Revisá tu conexión, VPN o bloqueo regional.')}
+async function loadHistory(){
+ const data=await fetchKlines();candles=data.map(k=>({time:Math.floor(k[0]/1000),open:+k[1],high:+k[2],low:+k[3],close:+k[4]}));
+ candleSeries.setData(candles);chart.timeScale().fitContent();updateIndicators();$('chartTitle').textContent=currentSymbol+' · Velas '+currentInterval;
+}
+function openStream(path,onMsg,run,setStatus){
+ let i=wsHost,tries=0;const s={ws:null,closed:false,close(){this.closed=true;if(this.ws)try{this.ws.close()}catch(e){}}};
+ const attempt=()=>{if(s.closed||run!==runId)return;const ws=new WebSocket(WS_HOSTS[i%WS_HOSTS.length]+path);s.ws=ws;let opened=false;
+  ws.onopen=()=>{opened=true;tries=0;wsHost=i%WS_HOSTS.length;if(setStatus)setStatus('Mercado conectado')};
+  ws.onmessage=onMsg;ws.onerror=()=>{try{ws.close()}catch(e){}};
+  ws.onclose=()=>{if(s.closed||run!==runId)return;if(!opened){i++;tries++}if(setStatus)setStatus(tries>=WS_HOSTS.length*2?'Sin conexión · reintentando…':'Reconectando…');setTimeout(attempt,Math.min(1000*(tries+1),5000))};
+ };attempt();return s;
+}
+function connectKlines(run){
+ socket=openStream(`/ws/${currentSymbol.toLowerCase()}@kline_${currentInterval}`,e=>{let k=JSON.parse(e.data).k,c={time:Math.floor(k.t/1000),open:+k.o,high:+k.h,low:+k.l,close:+k.c};let last=candles.at(-1);if(last&&last.time===c.time)candles[candles.length-1]=c;else candles.push(c);if(candles.length>300)candles.shift();candleSeries.update(c);updateIndicators();checkAlerts(+k.c)},run,t=>{$('connection').textContent=t});
+}
+function connectTicker(run){
+ const syms=[...new Set([...WATCH,currentSymbol])];
+ tickerSocket=openStream('/stream?streams='+syms.map(x=>x.toLowerCase()+'@miniTicker').join('/'),e=>{
+  const d=JSON.parse(e.data).data;if(!d)return;ticks[d.s]={c:+d.c,pct:(+d.c-+d.o)/+d.o*100,q:+d.q};
+  $('watchlist').innerHTML=WATCH.filter(x=>ticks[x]).map(x=>`<tr><td class="coin">${x.replace('USDT','')}</td><td class="right">${fmt(ticks[x].c)}</td><td class="right ${ticks[x].pct>=0?'up':'down'}">${ticks[x].pct.toFixed(2)}%</td></tr>`).join('');
+  const t=ticks[currentSymbol];if(t&&d.s===currentSymbol){$('price').textContent=fmt(t.c);$('change24').textContent=t.pct.toFixed(2)+'%';$('change24').className='metric '+(t.pct>=0?'up':'down');$('priceChange').textContent='Último precio negociado';$('volume24').textContent=t.q.toLocaleString('en-US',{notation:'compact',maximumFractionDigits:2});checkAlerts(t.c)}
+ },run);
+}
+function checkAlerts(price){alerts.forEach(a=>{if(a.active&&a.symbol===currentSymbol&&((a.condition==='above'&&price>=a.target)||(a.condition==='below'&&price<=a.target))){a.active=false;toast(`Alerta ${currentSymbol}: precio ${fmt(price)}`);if('Notification'in window&&Notification.permission==='granted')new Notification('NEXUS AI · Alerta',{body:`${currentSymbol} alcanzó ${fmt(price)}`});renderAlerts()}})}
+function renderAlerts(){$('alertList').innerHTML=alerts.length?alerts.map((a,i)=>`${i+1}. ${a.symbol} ${a.condition==='above'?'↑':'↓'} ${fmt(a.target)} · ${a.active?'Activa':'Disparada'}`).join('<br>'):'No hay alertas configuradas.'}
+async function start(){const run=++runId;if(socket)socket.close();if(tickerSocket)tickerSocket.close();$('connection').textContent='Conectando…';try{await loadHistory()}catch(e){if(run===runId)toast(e.message)}if(run!==runId)return;connectKlines(run);connectTicker(run)}
+$('symbol').onchange=e=>{currentSymbol=e.target.value;start()};$('interval').onchange=e=>{currentInterval=e.target.value;start()};$('refresh').onclick=()=>start();
+$('addAlert').onclick=()=>{let target=+$('target').value;if(!target||target<=0){toast('Ingresá un precio válido');return}alerts.push({symbol:currentSymbol,target,condition:$('condition').value,active:true});$('target').value='';renderAlerts();if('Notification'in window&&Notification.permission==='default')Notification.requestPermission()};
+initChart();start();
+</script>
+</body></html>
