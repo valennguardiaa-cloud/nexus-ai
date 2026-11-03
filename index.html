@@ -20,6 +20,8 @@ main{max-width:1500px;margin:auto;padding:24px}.topline{display:flex;justify-con
 .alert-form{display:flex;gap:7px;margin-top:10px}.alert-form input{min-width:0;width:100%;background:#0b1422;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:10px}.alert-list{font-size:11px;color:var(--muted);line-height:1.7;margin-top:9px}
 .footer{margin-top:16px;color:#71829b;font-size:10px;line-height:1.6;text-align:center}.toast{position:fixed;right:20px;bottom:20px;background:#163b35;border:1px solid #277b68;padding:12px 16px;border-radius:9px;display:none;z-index:10}
 @media(max-width:900px){.layout{grid-template-columns:1fr}.grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:560px){header{padding:0 14px}main{padding:15px}.topline{align-items:start;flex-direction:column}.grid{gap:8px}.metric{font-size:19px}#chart{height:300px}.indicator-row{grid-template-columns:1fr 1fr}}
+.bt-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:12px}.bt-form label{font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:4px}.bt-form input{width:100%}
+.bt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:12px}.bt-table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}.bt-table td,.bt-table th{padding:7px 4px;border-bottom:1px solid var(--line);text-align:right}.bt-table th{color:var(--muted);font-weight:600;font-size:11px}.bt-table td:first-child,.bt-table th:first-child{text-align:left}
 </style>
 </head>
 <body>
@@ -40,6 +42,10 @@ main{max-width:1500px;margin:auto;padding:24px}.topline{display:flex;justify-con
    <section class="card"><div class="section-head"><h2>Crear alerta de precio</h2></div><div class="sub">Aviso local cuando el precio cruce el nivel elegido. Mantener esta pestaña abierta.</div><div class="alert-form"><select id="condition"><option value="above">Mayor que</option><option value="below">Menor que</option></select><input id="target" type="number" step="any" placeholder="Precio objetivo"></div><button class="primary" id="addAlert" style="width:100%;margin-top:8px">Crear alerta</button><div id="alertList" class="alert-list">No hay alertas configuradas.</div></section>
   </aside>
  </div>
+ <section class="card" id="btCard" style="margin-top:16px"><div class="section-head"><h2>Backtest · cruce de EMAs</h2><span class="muted">histórico real</span></div>
+ <div class="sub">Compra cuando la EMA rápida cruza hacia arriba la lenta y vende al cruzar hacia abajo. La señal se toma al cierre de la vela y se ejecuta en la apertura de la siguiente, con comisión y slippage. Siempre se compara contra comprar y mantener.</div>
+ <div class="bt-form"><label>EMA rápida<input id="btFast" type="number" value="20" min="2"></label><label>EMA lenta<input id="btSlow" type="number" value="50" min="3"></label><label>Comisión (bps)<input id="btFee" type="number" value="10" min="0" step="any"></label><label>Slippage (bps)<input id="btSlip" type="number" value="5" min="0" step="any"></label></div>
+ <button class="primary" id="btRun" style="width:100%;margin-top:10px">Ejecutar backtest (hasta 1000 velas)</button><div id="btOut" style="margin-top:6px"></div></section>
  <div class="footer">NEXUS AI es una demostración técnica. No constituye asesoramiento financiero ni ejecuta operaciones. Los datos proceden de endpoints públicos de Binance. Las señales son reglas ilustrativas, no predicciones.</div>
 </main><div class="toast" id="toast"></div>
 <script>
@@ -64,7 +70,7 @@ function updateIndicators(){
 }
 const REST_HOSTS=['https://data-api.binance.vision','https://api.binance.com','https://api1.binance.com'],WS_HOSTS=['wss://data-stream.binance.vision','wss://stream.binance.com:9443'];
 let restHost=0,wsHost=0,runId=0;const ticks={},WATCH=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT'];
-async function fetchKlines(){let last;for(let n=0;n<REST_HOSTS.length;n++){const idx=(restHost+n)%REST_HOSTS.length;try{const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),8000);const res=await fetch(`${REST_HOSTS[idx]}/api/v3/klines?symbol=${currentSymbol}&interval=${currentInterval}&limit=250`,{signal:ctl.signal});clearTimeout(t);if(res.ok){restHost=idx;return await res.json()}last=new Error('Binance respondió '+res.status)}catch(e){last=e}}throw new Error('No se pudo cargar el histórico ('+((last&&last.message)||'sin respuesta')+'). Revisá tu conexión, VPN o bloqueo regional.')}
+async function fetchKlines(limit=250){let last;for(let n=0;n<REST_HOSTS.length;n++){const idx=(restHost+n)%REST_HOSTS.length;try{const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),8000);const res=await fetch(`${REST_HOSTS[idx]}/api/v3/klines?symbol=${currentSymbol}&interval=${currentInterval}&limit=${limit}`,{signal:ctl.signal});clearTimeout(t);if(res.ok){restHost=idx;return await res.json()}last=new Error('Binance respondió '+res.status)}catch(e){last=e}}throw new Error('No se pudo cargar el histórico ('+((last&&last.message)||'sin respuesta')+'). Revisá tu conexión, VPN o bloqueo regional.')}
 async function loadHistory(){
  const data=await fetchKlines();candles=data.map(k=>({time:Math.floor(k[0]/1000),open:+k[1],high:+k[2],low:+k[3],close:+k[4]}));
  candleSeries.setData(candles);chart.timeScale().fitContent();updateIndicators();$('chartTitle').textContent=currentSymbol+' · Velas '+currentInterval;
@@ -90,6 +96,54 @@ function connectTicker(run){
 }
 function checkAlerts(price){alerts.forEach(a=>{if(a.active&&a.symbol===currentSymbol&&((a.condition==='above'&&price>=a.target)||(a.condition==='below'&&price<=a.target))){a.active=false;toast(`Alerta ${currentSymbol}: precio ${fmt(price)}`);if('Notification'in window&&Notification.permission==='granted')new Notification('NEXUS AI · Alerta',{body:`${currentSymbol} alcanzó ${fmt(price)}`});renderAlerts()}})}
 function renderAlerts(){$('alertList').innerHTML=alerts.length?alerts.map((a,i)=>`${i+1}. ${a.symbol} ${a.condition==='above'?'↑':'↓'} ${fmt(a.target)} · ${a.active?'Activa':'Disparada'}`).join('<br>'):'No hay alertas configuradas.'}
+/*BT-START*/
+function emaSeries(v,period){const a=2/(period+1),o=new Array(v.length);o[0]=v[0];for(let i=1;i<v.length;i++)o[i]=a*v[i]+(1-a)*o[i-1];return o}
+function backtestEma(c,fast,slow,feeBps,slipBps,start,end,ppy){
+ const n=c.length;if(!(fast>=2)||!(slow>fast))return{error:'Parámetros inválidos: se requiere 2 ≤ rápida < lenta'};
+ const first=Math.max(slow,start==null?1:start),last=end==null?n-1:Math.min(end,n-1);
+ if(last-first<10)return{error:'Historial insuficiente: se necesitan más velas que la EMA lenta'};
+ const closes=c.map(x=>x.close),opens=c.map(x=>x.open),ef=emaSeries(closes,fast),es=emaSeries(closes,slow),fee=feeBps/1e4,slip=slipBps/1e4;
+ let cash=1,units=0,entryEq=null,barsIn=0;const eq=[1],trades=[];
+ for(let i=first;i<last;i++){
+  const up=ef[i]>es[i]&&ef[i-1]<=es[i-1],down=ef[i]<es[i]&&ef[i-1]>=es[i-1],px=opens[i+1];
+  if(up&&units===0){entryEq=cash;units=cash*(1-fee)/(px*(1+slip));cash=0}
+  else if(down&&units>0){cash=units*px*(1-slip)*(1-fee);trades.push(cash/entryEq-1);units=0}
+  if(units>0)barsIn++;eq.push(cash+units*closes[i+1]);
+ }
+ let finalEq=cash,openAtEnd=false;if(units>0){finalEq=units*closes[last]*(1-slip)*(1-fee);openAtEnd=true}
+ let peak=1,dd=0;for(const e of eq){peak=Math.max(peak,e);dd=Math.max(dd,(peak-e)/peak)}
+ let sharpe=null;if(ppy){const r=[];for(let k=1;k<eq.length;k++)r.push(eq[k]/eq[k-1]-1);const m=r.reduce((a,b)=>a+b,0)/r.length,v=r.reduce((a,b)=>a+(b-m)*(b-m),0)/Math.max(r.length-1,1);if(v>0)sharpe=m/Math.sqrt(v)*Math.sqrt(ppy)}
+ const bh=(1-fee)/(opens[first+1]*(1+slip))*closes[last]*(1-slip)*(1-fee),wins=trades.filter(t=>t>0).length;
+ return{returnPct:(finalEq-1)*100,buyHoldPct:(bh-1)*100,maxDdPct:dd*100,sharpe,roundTrips:trades.length,
+  winRatePct:trades.length?wins/trades.length*100:null,avgTradePct:trades.length?trades.reduce((a,b)=>a+b,0)/trades.length*100:null,
+  exposurePct:barsIn/(last-first)*100,openAtEnd,bars:last-first};
+}
+function backtestSegments(c,fast,slow,k,feeBps,slipBps,ppy){
+ const first=slow,last=c.length-1,span=Math.floor((last-first)/k),out=[];
+ for(let j=0;j<k;j++){const s=first+j*span,e=j===k-1?last:first+(j+1)*span,r=backtestEma(c,fast,slow,feeBps,slipBps,s,e,ppy);out.push(Object.assign({segment:j+1,fromTime:c[s].time,toTime:c[e].time},r))}
+ return out;
+}
+/*BT-END*/
+const INTERVAL_MIN={'1m':1,'5m':5,'15m':15,'1h':60,'4h':240};
+const pct=(x,d=2)=>(x>=0?'+':'')+x.toFixed(d)+'%',cls=x=>x>=0?'up':'down';
+async function runBacktest(){
+ const out=$('btOut'),btn=$('btRun');btn.disabled=true;out.innerHTML='<div class="sub">Descargando histórico…</div>';
+ try{
+  const fast=+$('btFast').value,slow=+$('btSlow').value,fee=+$('btFee').value,slip=+$('btSlip').value;
+  if(![fast,slow,fee,slip].every(Number.isFinite)||fee<0||slip<0||fee>100||slip>100)throw new Error('Revisá los valores (comisión y slippage entre 0 y 100 bps).');
+  const raw=await fetchKlines(1000),c=raw.map(k=>({time:Math.floor(k[0]/1000),open:+k[1],close:+k[4]})),ppy=525600/INTERVAL_MIN[currentInterval];
+  const r=backtestEma(c,fast,slow,fee,slip,null,null,ppy);if(r.error)throw new Error(r.error);
+  const segs=backtestSegments(c,fast,slow,3,fee,slip,ppy),d=t=>new Date(t*1000).toISOString().slice(0,10),beat=r.returnPct>r.buyHoldPct;
+  const box=(l,v,k)=>`<div class="indicator"><span>${l}</span><b class="${k||''}">${v}</b></div>`;
+  out.innerHTML=`<div class="sub" style="margin-top:12px">${currentSymbol} · ${currentInterval} · ${c.length} velas (${d(c[0].time)} → ${d(c[c.length-1].time)})</div>
+  <div class="bt-grid">${box('Estrategia',pct(r.returnPct),cls(r.returnPct))}${box('Comprar y mantener',pct(r.buyHoldPct),cls(r.buyHoldPct))}${box('Caída máxima','-'+r.maxDdPct.toFixed(2)+'%','down')}${box('Operaciones',r.roundTrips)}${box('Acierto',r.winRatePct===null?'—':r.winRatePct.toFixed(0)+'%')}${box('Tiempo invertido',r.exposurePct.toFixed(0)+'%')}${box('Sharpe anualizado',r.sharpe===null?'—':r.sharpe.toFixed(2))}</div>
+  <div class="sub" style="margin-top:12px"><b>${beat?'La estrategia superó a comprar y mantener':'La estrategia no superó a comprar y mantener'}</b> en este periodo${r.openAtEnd?' (posición abierta liquidada al final, con costes)':''}.</div>
+  <table class="bt-table"><tr><th>Tramo</th><th>Desde</th><th>Estrategia</th><th>Mantener</th><th>Op.</th></tr>${segs.map(s=>s.error?`<tr><td>${s.segment}</td><td colspan="4">${s.error}</td></tr>`:`<tr><td>${s.segment}</td><td>${d(s.fromTime)}</td><td class="${cls(s.returnPct)}">${pct(s.returnPct)}</td><td class="${cls(s.buyHoldPct)}">${pct(s.buyHoldPct)}</td><td>${s.roundTrips}</td></tr>`).join('')}</table>
+  <div class="sub" style="margin-top:10px">${r.roundTrips<10?'⚠ Pocas operaciones: el resultado no es estadísticamente significativo. ':''}Un solo periodo no demuestra ventaja: si los tramos se contradicen, el resultado depende del régimen de mercado. No incluye spread real, liquidez ni funding. Es una simulación, no asesoramiento financiero.</div>`;
+ }catch(e){out.innerHTML=`<div class="sub" style="margin-top:12px;color:var(--red)">${String(e.message).replace(/[<>&]/g,'')}</div>`}
+ btn.disabled=false;
+}
+$('btRun').onclick=runBacktest;
 async function start(){const run=++runId;if(socket)socket.close();if(tickerSocket)tickerSocket.close();$('connection').textContent='Conectando…';try{await loadHistory()}catch(e){if(run===runId)toast(e.message)}if(run!==runId)return;connectKlines(run);connectTicker(run)}
 $('symbol').onchange=e=>{currentSymbol=e.target.value;start()};$('interval').onchange=e=>{currentInterval=e.target.value;start()};$('refresh').onclick=()=>start();
 $('addAlert').onclick=()=>{let target=+$('target').value;if(!target||target<=0){toast('Ingresá un precio válido');return}alerts.push({symbol:currentSymbol,target,condition:$('condition').value,active:true});$('target').value='';renderAlerts();if('Notification'in window&&Notification.permission==='default')Notification.requestPermission()};
