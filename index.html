@@ -237,11 +237,11 @@ function togglePill(key){
 function renderPills(){
  const I=state.ind;
  $('pills').innerHTML=I.emas.map((s,i)=>`<button class="pill${s.on?'':' off'}" data-pill="e${i}" style="${s.on?'border-color:'+EMA_COLORS[i]:''}">EMA ${s.period}</button>`).join('')
-  +`<button class="pill${I.vol.on?'':' off'}" data-pill="vol">Vol</button><button class="pill${I.rsi.on?'':' off'}" data-pill="rsi">RSI ${I.rsi.period}</button><button class="pill${I.stoch.on?'':' off'}" data-pill="stoch">Estoc. ${I.stoch.k}·${I.stoch.smooth}·${I.stoch.d}</button><button class="pill fit" data-pill="fit" title="Ajustar el gráfico a los datos">⤢ Ajustar</button>`;
+  +`<button class="pill${I.vol.on?'':' off'}" data-pill="vol">Vol</button><button class="pill${I.rsi.on?'':' off'}" data-pill="rsi">RSI ${I.rsi.period}</button><button class="pill${I.stoch.on?'':' off'}" data-pill="stoch">Estoc. ${I.stoch.k}·${I.stoch.smooth}·${I.stoch.d}</button>${liqPill()}<button class="pill fit" data-pill="fit" title="Ajustar el gráfico a los datos">⤢ Ajustar</button>`;
 }
 
 /* ---------- gráfico principal (precio + RSI y estocástico en paneles inferiores) ---------- */
-let chart,candleSeries,volS,emaLines=[],rsiS,stK,stD;const rsiLevels=[],stLevels=[];
+let chart,candleSeries,volS,emaLines=[],rsiS,rsiZ,stZ,stK,stD;const rsiLevels=[],stLevels=[];
 const OSC_H=120,GAP=16;
 const mainHeight=()=>(typeof window!=='undefined'&&window.innerWidth<=560)?300:380;
 const activePanes=()=>{const p=[];if(state.ind.rsi.on)p.push('rsi');if(state.ind.stoch.on)p.push('stoch');return p};
@@ -252,7 +252,9 @@ function initChart(){
  volS=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'vol',priceLineVisible:false,lastValueVisible:false});
  emaLines=EMA_COLORS.map(color=>chart.addLineSeries({color,lineWidth:2,priceLineVisible:false,lastValueVisible:false}));
  const fixed01={autoscaleInfoProvider:()=>({priceRange:{minValue:0,maxValue:100}}),priceLineVisible:false,lastValueVisible:false,lineWidth:2,priceFormat:{type:'price',precision:1,minMove:0.1}};
+ rsiZ=makeZones(chart);
  rsiS=chart.addLineSeries(Object.assign({color:'#b78cff',priceScaleId:'rsi'},fixed01));
+ stZ=makeZones(chart,'stoch');
  stK=chart.addLineSeries(Object.assign({color:'#69a7ff',priceScaleId:'stoch'},fixed01));
  stD=chart.addLineSeries(Object.assign({color:'#f6c66a',priceScaleId:'stoch',lineWidth:1},{...fixed01,lineWidth:1}));
  new ResizeObserver(resizeChart).observe(box);
@@ -291,26 +293,112 @@ function layoutChart(ch,I,box,lab){
  });
  lab.innerHTML=labels.join('');
 }
-function setLevels(series,store,levels){store.splice(0).forEach(l=>{try{series.removePriceLine(l)}catch(e){}});levels.forEach(([price,color])=>store.push(series.createPriceLine({price,color,lineWidth:1,lineStyle:2,axisLabelVisible:false,title:''})))}
+const levelW=c=>/\.25\)/.test(c)?1:2;
+const OB_FILL=['rgba(255,101,122,.30)','rgba(255,101,122,.08)'],OS_FILL=['rgba(45,212,160,.08)','rgba(45,212,160,.30)'];
+function makeZones(ch,sc){const base={priceScaleId:sc||'rsi',priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,lineVisible:false,autoscaleInfoProvider:()=>({priceRange:{minValue:0,maxValue:100}}),baseValue:{type:'price',price:50}};
+ const ob=ch.addBaselineSeries(Object.assign({},base,{topLineColor:'transparent',bottomLineColor:'transparent',topFillColor1:OB_FILL[0],topFillColor2:OB_FILL[1],bottomFillColor1:'transparent',bottomFillColor2:'transparent'}));
+ const os=ch.addBaselineSeries(Object.assign({},base,{topLineColor:'transparent',bottomLineColor:'transparent',topFillColor1:'transparent',topFillColor2:'transparent',bottomFillColor1:OS_FILL[0],bottomFillColor2:OS_FILL[1]}));
+ return {ob,os}}
+function applyZones(z,I,k){k=k||'rsi';const on=I[k].on;z.ob.applyOptions({visible:on,baseValue:{type:'price',price:I[k].ob}});z.os.applyOptions({visible:on,baseValue:{type:'price',price:I[k].os}})}
+function pushZones(z,t,from,full,I,k){if(!I[k||'rsi'].on){if(full){z.ob.setData([]);z.os.setData([])}return}
+ if(full){const a=[],b=[];for(let i=from;i<t.length;i++){a.push({time:t[i],value:100});b.push({time:t[i],value:0})}z.ob.setData(a);z.os.setData(b)}
+ else{const x=t[t.length-1];z.ob.update({time:x,value:100});z.os.update({time:x,value:0})}}
+function setLevels(series,store,levels){store.splice(0).forEach(l=>{try{series.removePriceLine(l)}catch(e){}});levels.forEach(([price,color])=>store.push(series.createPriceLine({price,color,lineWidth:levelW(color),lineStyle:0,axisLabelVisible:true,title:''})))}
+
+
+/* ---------- MAPA DE LIQUIDACIONES ESTIMADO (estilo Coinglass, calculado con las velas cargadas) ---------- */
+const LIQ_LEV=[5,10,25,50,100],LIQ_W={5:.15,10:.3,25:.3,50:.2,100:.15},LIQ_MM=0.005;
+const liq=(()=>{const x=store.get('liq',null)||{};const lev=Array.isArray(x.lev)?x.lev.map(Number).filter(v=>LIQ_LEV.includes(v)):[10,25,50,100];
+ return{on:!!x.on,lev:lev.length?lev:[10,25,50,100],win:['200','500','1000','all'].includes(String(x.win))?String(x.win):'all',op:Math.min(1,Math.max(.1,Number(x.op)||.6)),res:[1,2,3].includes(+x.res)?+x.res:2,mode:['both','bands','bars'].includes(x.mode)?x.mode:'both'}})();
+const liqSave=()=>store.set('liq',liq);
+const liqPill=()=>`<button class="pill${liq.on?'':' off'}" data-liq="toggle" title="Mapa de liquidaciones estimado">Liquid.</button>`;
+function liqCompute(c){
+ if(!c||c.length<5)return null;
+ if(liq.win!=='all')c=c.slice(-Number(liq.win));
+ const n=c.length,last=c[n-1].close,step=last*[0,.0004,.0008,.0016][liq.res];
+ const sufMin=new Array(n),sufMax=new Array(n);let mn=Infinity,mx=-Infinity;
+ for(let i=n-1;i>=0;i--){sufMin[i]=mn;sufMax[i]=mx;if(c[i].low<mn)mn=c[i].low;if(c[i].high>mx)mx=c[i].high}
+ const wsum=liq.lev.reduce((a,l)=>a+LIQ_W[l],0),bins=new Map();
+ for(let i=0;i<n;i++){const k=c[i],p=(k.high+k.low+k.close)/3,v=(k.volume||0)*p/2;if(!(v>0))continue;
+  for(const l of liq.lev){const w=v*LIQ_W[l]/wsum,d=1/l-LIQ_MM;if(d<=0)continue;
+   const ql=p*(1-d),qs=p*(1+d);
+   if(!(sufMin[i]<=ql)){const b=Math.floor(ql/step);bins.set(b,(bins.get(b)||0)+w)}
+   if(!(sufMax[i]>=qs)){const b=Math.floor(qs/step);bins.set(b,(bins.get(b)||0)+w)}}}
+ let max=0;bins.forEach(v=>{if(v>max)max=v});if(!(max>0))return null;
+ const arr=[];bins.forEach((v,b)=>arr.push({lo:b*step,hi:(b+1)*step,n:v/max,usd:v}));
+ return{bins:arr,last,max};
+}
+const liqColor=(t,a)=>{
+ const st=[[0,[84,52,160]],[.45,[214,86,64]],[.75,[255,150,40]],[1,[255,226,90]]];let i=1;while(i<st.length-1&&t>st[i][0])i++;
+ const [t0,c0]=st[i-1],[t1,c1]=st[i],f=Math.min(1,Math.max(0,(t-t0)/(t1-t0))),m=c0.map((x,k)=>Math.round(x+(c1[k]-x)*f));return`rgba(${m[0]},${m[1]},${m[2]},${a})`};
+function makeLiqPrim(getSeries){
+ const prim={data:null,req:null,attached(p){prim.req=p.requestUpdate},detached(){prim.req=null},updateAllViews(){},
+  paneViews(){return[{zOrder:()=>'bottom',renderer:()=>({draw(target){
+   if(!liq.on||!prim.data)return;const ser=getSeries();if(!ser)return;
+   target.useMediaCoordinateSpace(({context:ctx,mediaSize})=>{
+    const W=mediaSize.width,H=mediaSize.height,d=prim.data;
+    for(const b of d.bins){if(b.n<.03)continue;
+     const y1=ser.priceToCoordinate(b.hi),y2=ser.priceToCoordinate(b.lo);if(y1==null||y2==null)continue;
+     if(y2<0||y1>H)continue;const h=Math.max(1,y2-y1),t=Math.pow(b.n,.7);
+     if(liq.mode!=='bars'){ctx.fillStyle=liqColor(t,(liq.op*(.15+.85*t)).toFixed(3));ctx.fillRect(0,y1,W,h)}
+     if(liq.mode!=='bands'){const mid=(b.lo+b.hi)/2,bw=Math.max(1,W*.16*t);ctx.fillStyle=mid<d.last?`rgba(45,212,160,${Math.min(1,liq.op+.25)})`:`rgba(255,101,122,${Math.min(1,liq.op+.25)})`;ctx.fillRect(W-bw,y1,bw,Math.max(1,h-.5))}
+    }
+   })}})}]}};
+ return prim;
+}
+let liqPM=null,liqPS=null;
+function liqUpdate(){
+ const set=(prim,cand)=>{if(!prim)return;prim.data=liq.on?liqCompute(cand):null;if(prim.req)prim.req()};
+ set(liqPM,state.candles);set(liqPS,S.candles);
+ const msg=!liq.on?'Desactivado.':'Estimación a partir de las velas cargadas: dónde se liquidarían posiciones abiertas con apalancamiento y que aún no tocó el precio. No son datos reales de Coinglass.';
+ document.querySelectorAll('.liqStatus').forEach(e=>e.textContent=msg);
+}
+function liqSyncUI(){document.querySelectorAll('.liqOn').forEach(e=>e.checked=liq.on);document.querySelectorAll('.liqWin').forEach(e=>e.value=liq.win);document.querySelectorAll('.liqOp').forEach(e=>e.value=liq.op);document.querySelectorAll('.liqRes').forEach(e=>e.value=liq.res);document.querySelectorAll('.liqMode').forEach(e=>e.value=liq.mode);document.querySelectorAll('.liqLev').forEach(e=>e.checked=liq.lev.includes(+e.dataset.l))}
+function liqSetOn(v){liq.on=v;liqSave();liqSyncUI();try{renderPills();sPills()}catch(e){}liqUpdate()}
+function liqMount(){
+ liqPM=makeLiqPrim(()=>candleSeries);liqPS=makeLiqPrim(()=>sCandle);
+ candleSeries.attachPrimitive(liqPM);sCandle.attachPrimitive(liqPS);
+ const html=`<div class="ind-group liq-group"><h3>Mapa de liquidaciones (estimado)</h3><div class="ind-grid"><label class="chk"><input type="checkbox" class="liqOn">Mostrar mapa</label>
+ <label>Ventana<select class="liqWin"><option value="200">Últimas 200 velas</option><option value="500">Últimas 500 velas</option><option value="1000">Últimas 1000 velas</option><option value="all">Todas las cargadas</option></select></label>
+ <label>Resolución<select class="liqRes"><option value="1">Fina</option><option value="2">Media</option><option value="3">Gruesa</option></select></label>
+ <label>Estilo<select class="liqMode"><option value="both">Bandas + barras</option><option value="bands">Solo bandas</option><option value="bars">Solo barras</option></select></label>
+ <label>Intensidad<input type="range" class="liqOp" min="0.1" max="1" step="0.05"></label></div>
+ <div class="ind-grid" style="margin-top:8px">${LIQ_LEV.map(l=>`<label class="chk"><input type="checkbox" class="liqLev" data-l="${l}">${l}x</label>`).join('')}</div>
+ <div class="sub liqStatus" style="margin-top:6px"></div></div>`;
+ ['indPanel','sPanel'].forEach(id=>{const el=$(id);if(el)el.insertAdjacentHTML('afterend',html)});
+ document.addEventListener('change',e=>{const t=e.target;if(!t.classList)return;
+  if(t.classList.contains('liqOn'))return liqSetOn(t.checked);
+  if(t.classList.contains('liqWin'))liq.win=t.value;
+  else if(t.classList.contains('liqRes'))liq.res=+t.value;
+  else if(t.classList.contains('liqMode'))liq.mode=t.value;
+  else if(t.classList.contains('liqOp'))liq.op=Math.min(1,Math.max(.1,Number(t.value)||.6));
+  else if(t.classList.contains('liqLev')){const l=+t.dataset.l,set=new Set(liq.lev);t.checked?set.add(l):set.delete(l);if(!set.size){t.checked=true;return}liq.lev=LIQ_LEV.filter(x=>set.has(x))}
+  else return;
+  liqSave();liqSyncUI();liqUpdate()});
+ document.addEventListener('input',e=>{const t=e.target;if(t.classList&&t.classList.contains('liqOp')){liq.op=Math.min(1,Math.max(.1,Number(t.value)||.6));liqUpdate()}});
+ document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('[data-liq]');if(b)liqSetOn(!liq.on)});
+ liqSyncUI();liqUpdate();
+}
+{const _r1=refreshIndicators,_r2=sRefresh;refreshIndicators=function(){const r=_r1.apply(this,arguments);try{liqUpdate()}catch(e){}return r};sRefresh=function(){const r=_r2.apply(this,arguments);try{liqUpdate()}catch(e){}return r}}
 function applyIndicatorUI(){
  const I=state.ind;
  I.emas.forEach((s,i)=>emaLines[i].applyOptions({visible:s.on}));
  volS.applyOptions({visible:I.vol.on});rsiS.applyOptions({visible:I.rsi.on});stK.applyOptions({visible:I.stoch.on});stD.applyOptions({visible:I.stoch.on});
- setLevels(rsiS,rsiLevels,I.rsi.on?[[I.rsi.ob,'rgba(255,101,122,.5)'],[50,'rgba(143,160,184,.25)'],[I.rsi.os,'rgba(45,212,160,.5)']]:[]);
- setLevels(stK,stLevels,I.stoch.on?[[I.stoch.ob,'rgba(255,101,122,.5)'],[I.stoch.os,'rgba(45,212,160,.5)']]:[]);
+ applyZones(rsiZ,I);setLevels(rsiS,rsiLevels,I.rsi.on?[[I.rsi.ob,'rgba(255,101,122,.95)'],[50,'rgba(143,160,184,.25)'],[I.rsi.os,'rgba(45,212,160,.95)']]:[]);
+ applyZones(stZ,I,'stoch');setLevels(stK,stLevels,I.stoch.on?[[I.stoch.ob,'rgba(255,101,122,.95)'],[I.stoch.os,'rgba(45,212,160,.95)']]:[]);
  renderPills();layoutChart();refreshIndicators(true);
 }
 function applyPrecision(price){const d=decimals(price),f={priceFormat:{type:'price',precision:d,minMove:Math.pow(10,-d)}};candleSeries.applyOptions(f);emaLines.forEach(s=>s.applyOptions(f))}
-function clearChart(){state.candles=[];candleSeries.setData([]);volS.setData([]);legendFor(null);emaLines.forEach(s=>s.setData([]));rsiS.setData([]);stK.setData([]);stD.setData([]);$('indRow').innerHTML='';$('signals').innerHTML='<div class="signal"><b>Cargando…</b><p>Descargando velas.</p></div>'}
+function clearChart(){state.candles=[];candleSeries.setData([]);volS.setData([]);legendFor(null);emaLines.forEach(s=>s.setData([]));rsiS.setData([]);rsiZ.ob.setData([]);rsiZ.os.setData([]);stK.setData([]);stD.setData([]);stZ.ob.setData([]);stZ.os.setData([]);$('indRow').innerHTML='';$('signals').innerHTML='<div class="signal"><b>Cargando…</b><p>Descargando velas.</p></div>'}
 function refreshIndicators(full){
  const c=state.candles;if(!c.length)return;
  const t=c.map(x=>x.time),cl=c.map(x=>x.close),hi=c.map(x=>x.high),lo=c.map(x=>x.low),I=state.ind,n=cl.length;
  const pts=(arr,from)=>{const o=[];for(let i=from;i<arr.length;i++)if(Number.isFinite(arr[i]))o.push({time:t[i],value:arr[i]});return o};
  const push=(series,arr,from)=>{if(full)series.setData(pts(arr,from));else if(Number.isFinite(arr[n-1]))series.update({time:t[n-1],value:arr[n-1]})};
  const emaVals=I.emas.map((s,i)=>{if(!s.on||n<s.period){if(full)emaLines[i].setData([]);return null}const e=emaSeries(cl,s.period);push(emaLines[i],e,s.period-1);return e[n-1]});
- let rv=null;if(I.rsi.on&&n>I.rsi.period){const r=rsiSeries(cl,I.rsi.period);push(rsiS,r,I.rsi.period);rv=r[n-1]}else if(full)rsiS.setData([]);
+ let rv=null;if(I.rsi.on&&n>I.rsi.period){const r=rsiSeries(cl,I.rsi.period);push(rsiS,r,I.rsi.period);rv=r[n-1];pushZones(rsiZ,t,I.rsi.period,full,I)}else if(full){rsiS.setData([]);pushZones(rsiZ,t,0,true,{rsi:{on:false}})}
  let kv=null,dv=null,kp=null,dp=null;
- if(I.stoch.on&&n>=I.stoch.k+I.stoch.smooth+I.stoch.d){const s=stochSeries(hi,lo,cl,I.stoch.k,I.stoch.smooth,I.stoch.d);push(stK,s.k,0);push(stD,s.d,0);kv=s.k[n-1];dv=s.d[n-1];kp=s.k[n-2];dp=s.d[n-2]}else if(full){stK.setData([]);stD.setData([])}
+ if(I.stoch.on&&n>=I.stoch.k+I.stoch.smooth+I.stoch.d){const s=stochSeries(hi,lo,cl,I.stoch.k,I.stoch.smooth,I.stoch.d);push(stK,s.k,0);push(stD,s.d,0);pushZones(stZ,t,0,full,I,'stoch');kv=s.k[n-1];dv=s.d[n-1];kp=s.k[n-2];dp=s.d[n-2]}else if(full){stK.setData([]);stD.setData([]);pushZones(stZ,t,0,true,{stoch:{on:false}},'stoch')}
  const vc=x=>({time:x.time,value:x.volume||0,color:x.close>=x.open?'rgba(45,212,160,.35)':'rgba(255,101,122,.35)'});
  if(full)volS.setData(c.map(vc));else volS.update(vc(c[n-1]));
  if(!hovering)legendLast();
@@ -457,7 +545,7 @@ function vwapSeries(c,mult){
  }
  return{v,sd};
 }
-let sChart,sCandle,sVol,sEma=[],sRsi,sK,sD,sVw,sUp=[],sDn=[];const sRL=[],sSL=[];
+let sChart,sCandle,sVol,sEma=[],sRsi,sK,sD,sVw,sRz,sSz,sUp=[],sDn=[];const sRL=[],sSL=[];
 const S={interval:SC_IV.some(a=>a[0]===store.get('sInterval'))?store.get('sInterval'):'1m',candles:[],ind:normS(store.get('indS')),run:0,socket:null,hover:false,armed:false,loading:false,nomore:false};
 const getP=(o,p)=>p.split('.').reduce((a,k)=>a[k],o);
 function setP(o,p,v){const k=p.split('.'),l=k.pop();k.reduce((a,x)=>a[x],o)[l]=v}
@@ -468,8 +556,9 @@ function sInit(){
  sVol=sChart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'vol',priceLineVisible:false,lastValueVisible:false});
  const ln=(color,w,st,extra)=>sChart.addLineSeries(Object.assign({color,lineWidth:w,lineStyle:st||0,priceLineVisible:false,lastValueVisible:false},extra||{}));
  sEma=EMA_COLORS.map(c=>ln(c,2));
- sVw=ln(VW_COLOR,2);sUp=BC.map(c=>ln(c,1,2));sDn=BC.map(c=>ln(c,1,2));
+ sVw=ln(VW_COLOR,2);sUp=BC.map(c=>ln(c,1,0));sDn=BC.map(c=>ln(c,1,0));
  const f01={autoscaleInfoProvider:()=>({priceRange:{minValue:0,maxValue:100}}),priceFormat:{type:'price',precision:1,minMove:0.1}};
+ sRz=makeZones(sChart);sSz=makeZones(sChart,'stoch');
  sRsi=ln('#b78cff',2,0,Object.assign({priceScaleId:'rsi'},f01));sK=ln('#69a7ff',2,0,Object.assign({priceScaleId:'stoch'},f01));sD=ln('#f6c66a',1,0,Object.assign({priceScaleId:'stoch'},f01));
  new ResizeObserver(sResize).observe(box);
  sChart.subscribeCrosshairMove(p=>{const d=p.time&&p.seriesData&&p.seriesData.get(sCandle);S.hover=!!d;if(d){const c=candleAt(p.time,S.candles);legendFor(Object.assign({},d,{volume:c?c.volume:0}),'sLegend')}else sLegendLast()});
@@ -494,15 +583,15 @@ function sFill(){$('sPanel').querySelectorAll('[data-p]').forEach(el=>{const v=g
 function sRead(){const o=JSON.parse(JSON.stringify(S.ind));$('sPanel').querySelectorAll('[data-p]').forEach(el=>setP(o,el.dataset.p,el.type==='checkbox'?el.checked:el.value));S.ind=normS(o);store.set('indS',S.ind);sFill();sApply()}
 function sPills(){
  const I=S.ind,b=(k,l,on,st)=>`<button class="pill${on?'':' off'}" data-pill="${k}"${st&&on?` style="border-color:${st}"`:''}>${l}</button>`;
- $('sPills').innerHTML=I.emas.map((e,i)=>b('e'+i,'EMA '+e.period,e.on,EMA_COLORS[i])).join('')+b('vwap','VWAP',I.vwap.on,VW_COLOR)+b('bands','Bandas σ',I.vwap.bands&&I.vwap.on)+b('vol','Vol',I.vol.on)+b('rsi','RSI '+I.rsi.period,I.rsi.on)+b('stoch',`Estoc. ${I.stoch.k}·${I.stoch.smooth}·${I.stoch.d}`,I.stoch.on)+'<button class="pill fit" data-pill="fit" title="Ajustar el gráfico a los datos recientes">⤢ Ajustar</button>';
+ $('sPills').innerHTML=I.emas.map((e,i)=>b('e'+i,'EMA '+e.period,e.on,EMA_COLORS[i])).join('')+b('vwap','VWAP',I.vwap.on,VW_COLOR)+b('bands','Bandas σ',I.vwap.bands&&I.vwap.on)+b('vol','Vol',I.vol.on)+b('rsi','RSI '+I.rsi.period,I.rsi.on)+b('stoch',`Estoc. ${I.stoch.k}·${I.stoch.smooth}·${I.stoch.d}`,I.stoch.on)+liqPill()+'<button class="pill fit" data-pill="fit" title="Ajustar el gráfico a los datos recientes">⤢ Ajustar</button>';
 }
 function sApply(){
  const I=S.ind,vb=I.vwap.on;
  I.emas.forEach((e,i)=>sEma[i].applyOptions({visible:e.on}));
  sVol.applyOptions({visible:I.vol.on});sRsi.applyOptions({visible:I.rsi.on});sK.applyOptions({visible:I.stoch.on});sD.applyOptions({visible:I.stoch.on});
  sVw.applyOptions({visible:vb});[...sUp,...sDn].forEach(x=>x.applyOptions({visible:vb&&I.vwap.bands}));
- setLevels(sRsi,sRL,I.rsi.on?[[I.rsi.ob,'rgba(255,101,122,.5)'],[50,'rgba(143,160,184,.25)'],[I.rsi.os,'rgba(45,212,160,.5)']]:[]);
- setLevels(sK,sSL,I.stoch.on?[[I.stoch.ob,'rgba(255,101,122,.5)'],[I.stoch.os,'rgba(45,212,160,.5)']]:[]);
+ applyZones(sRz,I);setLevels(sRsi,sRL,I.rsi.on?[[I.rsi.ob,'rgba(255,101,122,.95)'],[50,'rgba(143,160,184,.25)'],[I.rsi.os,'rgba(45,212,160,.95)']]:[]);
+ applyZones(sSz,I,'stoch');setLevels(sK,sSL,I.stoch.on?[[I.stoch.ob,'rgba(255,101,122,.95)'],[I.stoch.os,'rgba(45,212,160,.95)']]:[]);
  sPills();layoutChart(sChart,I,$('sChart'),$('sPaneLabels'));sRefresh(true);
 }
 function sResize(){const w=$('sChart').clientWidth;if(w>0&&sChart)sChart.applyOptions({width:w})}
@@ -515,9 +604,9 @@ function sRefresh(full){
  const pts=(a,f,gap)=>{const o=[];for(let i=f;i<a.length;i++){if(Number.isFinite(a[i]))o.push({time:t[i],value:a[i]});else if(gap)o.push({time:t[i]})}return o};
  const push=(sr,a,f,gap)=>{if(full)sr.setData(pts(a,f,gap));else if(Number.isFinite(a[n-1]))sr.update({time:t[n-1],value:a[n-1]})};
  const emaVals=I.emas.map((e,i)=>{if(!e.on||n<e.period){if(full)sEma[i].setData([]);return null}const a=emaSeries(cl,e.period);push(sEma[i],a,e.period-1);return a[n-1]});
- let rv=null;if(I.rsi.on&&n>I.rsi.period){const r=rsiSeries(cl,I.rsi.period);push(sRsi,r,I.rsi.period);rv=r[n-1]}else if(full)sRsi.setData([]);
+ let rv=null;if(I.rsi.on&&n>I.rsi.period){const r=rsiSeries(cl,I.rsi.period);push(sRsi,r,I.rsi.period);rv=r[n-1];pushZones(sRz,t,I.rsi.period,full,I)}else if(full){sRsi.setData([]);pushZones(sRz,t,0,true,{rsi:{on:false}})}
  let kv=null,dv=null,kp=null,dp=null;
- if(I.stoch.on&&n>=I.stoch.k+I.stoch.smooth+I.stoch.d){const q=stochSeries(hi,lo,cl,I.stoch.k,I.stoch.smooth,I.stoch.d);push(sK,q.k,0);push(sD,q.d,0);kv=q.k[n-1];dv=q.d[n-1];kp=q.k[n-2];dp=q.d[n-2]}else if(full){sK.setData([]);sD.setData([])}
+ if(I.stoch.on&&n>=I.stoch.k+I.stoch.smooth+I.stoch.d){const q=stochSeries(hi,lo,cl,I.stoch.k,I.stoch.smooth,I.stoch.d);push(sK,q.k,0);push(sD,q.d,0);pushZones(sSz,t,0,full,I,'stoch');kv=q.k[n-1];dv=q.d[n-1];kp=q.k[n-2];dp=q.d[n-2]}else if(full){sK.setData([]);sD.setData([]);pushZones(sSz,t,0,true,{stoch:{on:false}},'stoch')}
  const vc=x=>({time:x.time,value:x.volume||0,color:x.close>=x.open?'rgba(45,212,160,.35)':'rgba(255,101,122,.35)'});
  if(full)sVol.setData(c.map(vc));else sVol.update(vc(c[n-1]));
  // VWAP y bandas
@@ -540,7 +629,7 @@ function sRefresh(full){
  if(!S.hover)sLegendLast();
  renderIndicatorRow(emaVals,rv,kv,dv,I,'sIndRow',ex);renderSignals(emaVals,rv,kv,dv,kp,dp,I,'sSignals',sx);
 }
-function sClear(){S.candles=[];[sCandle,sVol,...sEma,sRsi,sK,sD,sVw,...sUp,...sDn].forEach(x=>x.setData([]));legendFor(null,'sLegend');$('sIndRow').innerHTML='';$('sSignals').innerHTML='<div class="signal"><b>Cargando…</b><p>Descargando velas.</p></div>'}
+function sClear(){S.candles=[];[sCandle,sVol,...sEma,sRsi,sK,sD,sVw,...sUp,...sDn,sRz.ob,sRz.os,sSz.ob,sSz.os].forEach(x=>x.setData([]));legendFor(null,'sLegend');$('sIndRow').innerHTML='';$('sSignals').innerHTML='<div class="signal"><b>Cargando…</b><p>Descargando velas.</p></div>'}
 async function sStart(run){
  if(!sChart)return;
  const sym=state.symbol,iv=S.interval,my=++S.run;
@@ -599,7 +688,7 @@ function init(){
  let rz;window.addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>{if(chart)layoutChart();if(sChart)layoutChart(sChart,S.ind,$('sChart'),$('sPaneLabels'))},150)});
  const alive=()=>{if(!document.hidden&&tickerSocket&&Date.now()-lastTick>25000)start()};setInterval(alive,10000);document.addEventListener('visibilitychange',alive);
  if(typeof LightweightCharts==='undefined'){setStatus('err','No cargó la librería del gráfico');toast('No se pudo cargar la librería del gráfico. Revisá tu conexión y recargá la página.','err');return}
- initChart();sInit();fillSettingsUI();applyIndicatorUI();renderAlerts();start();showTab(['bt','sc'].includes(store.get('tab'))?store.get('tab'):'market');
+ initChart();sInit();fillSettingsUI();liqMount();applyIndicatorUI();renderAlerts();start();showTab(['bt','sc'].includes(store.get('tab'))?store.get('tab'):'market');
 }
 init();
 </script>
