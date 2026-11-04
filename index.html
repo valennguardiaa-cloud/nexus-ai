@@ -37,6 +37,10 @@ details.help{margin-top:12px;color:var(--muted);font-size:12px;line-height:1.6}d
 .sw{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}.indicator-row{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}
 .ind-panel{margin-top:14px;border:1px solid var(--line);border-radius:10px;background:#0b1422;padding:10px 12px}.ind-panel summary{cursor:pointer;font-weight:600}
 .ind-group{margin-top:12px}.ind-group h3{margin:0 0 8px;font-size:12px;color:var(--muted);font-weight:600}.ind-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}.ind-grid label{font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:4px}.ind-grid label.chk{flex-direction:row;align-items:center;gap:6px;color:var(--text);font-size:12px}.ind-grid input[type=checkbox]{width:auto}
+.metric.flash-up{animation:fu .7s}.metric.flash-down{animation:fd .7s}
+@keyframes fu{from{color:var(--green);text-shadow:0 0 14px #2dd4a088}}@keyframes fd{from{color:var(--red);text-shadow:0 0 14px #ff657a88}}
+#legend{position:absolute;left:10px;top:4px;z-index:3;font-size:11px;color:var(--muted);pointer-events:none;background:#0e1725b3;padding:2px 7px;border-radius:4px;font-variant-numeric:tabular-nums;max-width:calc(100% - 90px)}
+.tab:focus-visible,.pill:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
 </style>
 </head>
 <body>
@@ -55,10 +59,11 @@ details.help{margin-top:12px;color:var(--muted);font-size:12px;line-height:1.6}d
   </section>
   <div class="layout">
    <section class="card chart-card"><div class="section-head"><h2 id="chartTitle">Velas</h2><div class="pills" id="pills"></div></div>
-    <div class="chart-wrap"><div id="chart"></div><div id="paneLabels"></div></div>
+    <div class="chart-wrap"><div id="legend"></div><div id="chart"></div><div id="paneLabels"></div></div>
     <div class="indicator-row" id="indRow"></div>
     <details class="ind-panel" id="indCard"><summary>⚙ Configurar indicadores</summary>
      <div id="indPanel">
+      <div class="ind-group"><h3>Volumen</h3><div class="ind-grid"><label class="chk"><input type="checkbox" id="volOn">Mostrar volumen</label></div></div>
       <div class="ind-group"><h3>Medias móviles exponenciales (EMA)</h3><div class="ind-grid">
        <label class="chk"><input type="checkbox" id="emaOn0"><i class="sw" style="background:#69a7ff"></i>EMA <input type="number" id="emaP0" min="2" max="500" style="width:70px"></label>
        <label class="chk"><input type="checkbox" id="emaOn1"><i class="sw" style="background:#f6c66a"></i>EMA <input type="number" id="emaP1" min="2" max="500" style="width:70px"></label>
@@ -163,6 +168,7 @@ function stochSeries(h,l,c,kp,sk,dp){const n=c.length,raw=new Array(n).fill(NaN)
 
 /* ---------- red: Binance REST + WebSocket con servidores alternativos ---------- */
 let restHost=0,wsHost=0,runId=0,socket=null,tickerSocket=null;
+let lastTick=Date.now(),loadArmed=false,noMore=false,loadingMore=false,hovering=false;
 async function fetchKlines(sym,iv,limit,endTime){
  let last;for(let n=0;n<REST_HOSTS.length;n++){const idx=(restHost+n)%REST_HOSTS.length;
   try{const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),9000);
@@ -175,7 +181,7 @@ async function fetchHistory(sym,iv,total,onProgress){
  while(out.length<total){const need=Math.min(1000,total-out.length),part=await fetchKlines(sym,iv,need,end);if(!part.length)break;out=part.concat(out);end=part[0][0]-1;if(onProgress)onProgress(out.length,total);if(part.length<need)break}
  return out;
 }
-const toCandle=k=>({time:Math.floor(k[0]/1000),open:+k[1],high:+k[2],low:+k[3],close:+k[4]});
+const toCandle=k=>({time:Math.floor(k[0]/1000),open:+k[1],high:+k[2],low:+k[3],close:+k[4],volume:+k[5]});
 function openStream(path,onMsg,run,setSt){
  let i=wsHost,tries=0;const s={ws:null,closed:false,close(){this.closed=true;if(this.ws)try{this.ws.close()}catch(e){}}};
  const attempt=()=>{if(s.closed||run!==runId)return;const ws=new WebSocket(WS_HOSTS[i%WS_HOSTS.length]+path);s.ws=ws;let opened=false;
@@ -187,12 +193,12 @@ function openStream(path,onMsg,run,setSt){
 
 /* ---------- indicadores configurables ---------- */
 const EMA_COLORS=['#69a7ff','#f6c66a','#b78cff','#ff8fb1'];
-const DEFAULT_IND={emas:[{on:true,period:20},{on:true,period:50},{on:false,period:100},{on:false,period:200}],rsi:{on:false,period:14,ob:70,os:30},stoch:{on:false,k:14,smooth:3,d:3,ob:80,os:20}};
+const DEFAULT_IND={vol:{on:true},emas:[{on:true,period:20},{on:true,period:50},{on:false,period:100},{on:false,period:200}],rsi:{on:false,period:14,ob:70,os:30},stoch:{on:false,k:14,smooth:3,d:3,ob:80,os:20}};
 const clampInt=(v,min,max,def)=>{if(v===''||v===null||v===undefined)return def;v=Math.round(Number(v));return Number.isFinite(v)?Math.min(max,Math.max(min,v)):def};
 const boolOr=(v,d)=>typeof v==='boolean'?v:d;
 function normalizeInd(x){
  const d=JSON.parse(JSON.stringify(DEFAULT_IND));if(!x||typeof x!=='object')return d;
- d.emas=d.emas.map((s,i)=>{const o=(x.emas&&x.emas[i])||{};return{on:boolOr(o.on,s.on),period:clampInt(o.period,2,500,s.period)}});
+ d.vol={on:boolOr(x.vol&&x.vol.on,true)};d.emas=d.emas.map((s,i)=>{const o=(x.emas&&x.emas[i])||{};return{on:boolOr(o.on,s.on),period:clampInt(o.period,2,500,s.period)}});
  const r=x.rsi||{};d.rsi={on:boolOr(r.on,d.rsi.on),period:clampInt(r.period,2,100,14),ob:clampInt(r.ob,51,99,70),os:clampInt(r.os,1,49,30)};
  const s=x.stoch||{};d.stoch={on:boolOr(s.on,d.stoch.on),k:clampInt(s.k,2,100,14),smooth:clampInt(s.smooth,1,20,3),d:clampInt(s.d,1,20,3),ob:clampInt(s.ob,51,99,80),os:clampInt(s.os,1,49,20)};
  return d;
@@ -200,29 +206,29 @@ function normalizeInd(x){
 state.ind=normalizeInd(store.get('ind'));
 const saveInd=()=>store.set('ind',state.ind);
 function fillSettingsUI(){
- const I=state.ind;I.emas.forEach((s,i)=>{$('emaOn'+i).checked=s.on;$('emaP'+i).value=s.period});
+ const I=state.ind;$('volOn').checked=I.vol.on;I.emas.forEach((s,i)=>{$('emaOn'+i).checked=s.on;$('emaP'+i).value=s.period});
  $('rsiOn').checked=I.rsi.on;$('rsiP').value=I.rsi.period;$('rsiOb').value=I.rsi.ob;$('rsiOs').value=I.rsi.os;
  $('stOn').checked=I.stoch.on;$('stK').value=I.stoch.k;$('stS').value=I.stoch.smooth;$('stD').value=I.stoch.d;$('stOb').value=I.stoch.ob;$('stOs').value=I.stoch.os;
 }
 function readSettings(){
  const g=id=>$(id).value,c=id=>$(id).checked;
- state.ind=normalizeInd({emas:[0,1,2,3].map(i=>({on:c('emaOn'+i),period:g('emaP'+i)})),rsi:{on:c('rsiOn'),period:g('rsiP'),ob:g('rsiOb'),os:g('rsiOs')},stoch:{on:c('stOn'),k:g('stK'),smooth:g('stS'),d:g('stD'),ob:g('stOb'),os:g('stOs')}});
+ state.ind=normalizeInd({vol:{on:c('volOn')},emas:[0,1,2,3].map(i=>({on:c('emaOn'+i),period:g('emaP'+i)})),rsi:{on:c('rsiOn'),period:g('rsiP'),ob:g('rsiOb'),os:g('rsiOs')},stoch:{on:c('stOn'),k:g('stK'),smooth:g('stS'),d:g('stD'),ob:g('stOb'),os:g('stOs')}});
  saveInd();fillSettingsUI();applyIndicatorUI();
 }
 function resetInd(){state.ind=normalizeInd(null);saveInd();fillSettingsUI();applyIndicatorUI()}
 function togglePill(key){
  if(key==='fit')return resetView();
- if(key==='rsi')state.ind.rsi.on=!state.ind.rsi.on;else if(key==='stoch')state.ind.stoch.on=!state.ind.stoch.on;else{const i=+key.slice(1);if(state.ind.emas[i])state.ind.emas[i].on=!state.ind.emas[i].on}
+ if(key==='vol')state.ind.vol.on=!state.ind.vol.on;else if(key==='rsi')state.ind.rsi.on=!state.ind.rsi.on;else if(key==='stoch')state.ind.stoch.on=!state.ind.stoch.on;else{const i=+key.slice(1);if(state.ind.emas[i])state.ind.emas[i].on=!state.ind.emas[i].on}
  saveInd();fillSettingsUI();applyIndicatorUI();
 }
 function renderPills(){
  const I=state.ind;
  $('pills').innerHTML=I.emas.map((s,i)=>`<button class="pill${s.on?'':' off'}" data-pill="e${i}" style="${s.on?'border-color:'+EMA_COLORS[i]:''}">EMA ${s.period}</button>`).join('')
-  +`<button class="pill${I.rsi.on?'':' off'}" data-pill="rsi">RSI ${I.rsi.period}</button><button class="pill${I.stoch.on?'':' off'}" data-pill="stoch">Estoc. ${I.stoch.k}·${I.stoch.smooth}·${I.stoch.d}</button><button class="pill fit" data-pill="fit" title="Ajustar el gráfico a los datos">⤢ Ajustar</button>`;
+  +`<button class="pill${I.vol.on?'':' off'}" data-pill="vol">Vol</button><button class="pill${I.rsi.on?'':' off'}" data-pill="rsi">RSI ${I.rsi.period}</button><button class="pill${I.stoch.on?'':' off'}" data-pill="stoch">Estoc. ${I.stoch.k}·${I.stoch.smooth}·${I.stoch.d}</button><button class="pill fit" data-pill="fit" title="Ajustar el gráfico a los datos">⤢ Ajustar</button>`;
 }
 
 /* ---------- gráfico principal (precio + RSI y estocástico en paneles inferiores) ---------- */
-let chart,candleSeries,emaLines=[],rsiS,stK,stD;const rsiLevels=[],stLevels=[];
+let chart,candleSeries,volS,emaLines=[],rsiS,stK,stD;const rsiLevels=[],stLevels=[];
 const OSC_H=120,GAP=16;
 const mainHeight=()=>(typeof window!=='undefined'&&window.innerWidth<=560)?300:380;
 const activePanes=()=>{const p=[];if(state.ind.rsi.on)p.push('rsi');if(state.ind.stoch.on)p.push('stoch');return p};
@@ -230,12 +236,29 @@ function initChart(){
  const box=$('chart');
  chart=LightweightCharts.createChart(box,{width:box.clientWidth||600,height:mainHeight(),layout:{background:{color:'transparent'},textColor:'#8fa0b8'},grid:{vertLines:{color:'#162235'},horzLines:{color:'#162235'}},rightPriceScale:{borderColor:'#202d40',scaleMargins:{top:.06,bottom:.08}},timeScale:{borderColor:'#202d40',timeVisible:true,secondsVisible:false}});
  candleSeries=chart.addCandlestickSeries({upColor:'#2dd4a0',downColor:'#ff657a',borderVisible:false,wickUpColor:'#2dd4a0',wickDownColor:'#ff657a'});
+ volS=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'vol',priceLineVisible:false,lastValueVisible:false});
  emaLines=EMA_COLORS.map(color=>chart.addLineSeries({color,lineWidth:2,priceLineVisible:false,lastValueVisible:false}));
  const fixed01={autoscaleInfoProvider:()=>({priceRange:{minValue:0,maxValue:100}}),priceLineVisible:false,lastValueVisible:false,lineWidth:2,priceFormat:{type:'price',precision:1,minMove:0.1}};
  rsiS=chart.addLineSeries(Object.assign({color:'#b78cff',priceScaleId:'rsi'},fixed01));
  stK=chart.addLineSeries(Object.assign({color:'#69a7ff',priceScaleId:'stoch'},fixed01));
  stD=chart.addLineSeries(Object.assign({color:'#f6c66a',priceScaleId:'stoch',lineWidth:1},{...fixed01,lineWidth:1}));
  new ResizeObserver(resizeChart).observe(box);
+ chart.subscribeCrosshairMove(p=>{const d=p.time&&p.seriesData&&p.seriesData.get(candleSeries);hovering=!!d;if(d){const c=candleAt(p.time);legendFor(Object.assign({},d,{volume:c?c.volume:0}))}else legendLast()});
+ chart.timeScale().subscribeVisibleLogicalRangeChange(r=>{if(r&&r.from<10&&loadArmed&&!loadingMore&&!noMore&&state.candles.length)loadMore()});
+}
+function candleAt(t){const a=state.candles;let lo=0,hi=a.length-1;while(lo<=hi){const m=(lo+hi)>>1;if(a[m].time===t)return a[m];if(a[m].time<t)lo=m+1;else hi=m-1}return null}
+function legendFor(c){const L=$('legend');if(!c){L.innerHTML='';return}L.innerHTML=`Ap ${fmt(c.open)} · Máx ${fmt(c.high)} · Mín ${fmt(c.low)} · Cie <b class="${c.close>=c.open?'up':'down'}">${fmt(c.close)}</b> · Vol ${compact(c.volume||0)}`}
+function legendLast(){const a=state.candles;legendFor(a.length?a[a.length-1]:null)}
+async function loadMore(){
+ const run=runId,first=state.candles[0].time;loadingMore=true;let failed=false;
+ try{
+  const raw=await fetchKlines(state.symbol,state.interval,500,first*1000-1);if(run!==runId)return;
+  const add=raw.map(toCandle).filter(x=>x.time<first);if(!add.length){noMore=true;return}
+  const ts=chart.timeScale(),rg=ts.getVisibleLogicalRange();
+  state.candles=add.concat(state.candles);candleSeries.setData(state.candles);refreshIndicators(true);
+  if(rg)ts.setVisibleLogicalRange({from:rg.from+add.length,to:rg.to+add.length});
+ }catch(e){failed=true}
+ finally{if(run===runId){if(failed)setTimeout(()=>{if(run===runId)loadingMore=false},5000);else loadingMore=false}}
 }
 function resizeChart(){const w=$('chart').clientWidth;if(w>0)chart.applyOptions({width:w})}
 // Al cambiar de moneda la escala de precios se reajusta (si el usuario la movió a mano deja de ser automática).
@@ -243,7 +266,9 @@ function resetView(){chart.priceScale('right').applyOptions({autoScale:true});ch
 function layoutChart(){
  const panes=activePanes(),M=mainHeight(),H=M+panes.length*(OSC_H+GAP),I=state.ind,labels=[];
  $('chart').style.height=H+'px';chart.applyOptions({height:H});
- chart.priceScale('right').applyOptions({scaleMargins:{top:24/H,bottom:(H-M+24)/H}});
+ const vh=I.vol.on?M*0.18:0;
+ chart.priceScale('right').applyOptions({scaleMargins:{top:24/H,bottom:(H-M+24+vh)/H}});
+ chart.priceScale('vol').applyOptions({scaleMargins:{top:(M-vh)/H,bottom:(H-M)/H}});
  [['rsi',`RSI (${I.rsi.period})`],['stoch',`Estocástico (${I.stoch.k}, ${I.stoch.smooth}, ${I.stoch.d})`]].forEach(([id,text])=>{
   const i=panes.indexOf(id);if(i<0)return;const top=M+GAP+i*(OSC_H+GAP);
   chart.priceScale(id).applyOptions({scaleMargins:{top:top/H,bottom:Math.max(0,(H-top-OSC_H))/H}});
@@ -255,13 +280,13 @@ function setLevels(series,store,levels){store.splice(0).forEach(l=>{try{series.r
 function applyIndicatorUI(){
  const I=state.ind;
  I.emas.forEach((s,i)=>emaLines[i].applyOptions({visible:s.on}));
- rsiS.applyOptions({visible:I.rsi.on});stK.applyOptions({visible:I.stoch.on});stD.applyOptions({visible:I.stoch.on});
+ volS.applyOptions({visible:I.vol.on});rsiS.applyOptions({visible:I.rsi.on});stK.applyOptions({visible:I.stoch.on});stD.applyOptions({visible:I.stoch.on});
  setLevels(rsiS,rsiLevels,I.rsi.on?[[I.rsi.ob,'rgba(255,101,122,.5)'],[50,'rgba(143,160,184,.25)'],[I.rsi.os,'rgba(45,212,160,.5)']]:[]);
  setLevels(stK,stLevels,I.stoch.on?[[I.stoch.ob,'rgba(255,101,122,.5)'],[I.stoch.os,'rgba(45,212,160,.5)']]:[]);
  renderPills();layoutChart();refreshIndicators(true);
 }
 function applyPrecision(price){const d=decimals(price),f={priceFormat:{type:'price',precision:d,minMove:Math.pow(10,-d)}};candleSeries.applyOptions(f);emaLines.forEach(s=>s.applyOptions(f))}
-function clearChart(){state.candles=[];candleSeries.setData([]);emaLines.forEach(s=>s.setData([]));rsiS.setData([]);stK.setData([]);stD.setData([]);$('indRow').innerHTML='';$('signals').innerHTML='<div class="signal"><b>Cargando…</b><p>Descargando velas.</p></div>'}
+function clearChart(){state.candles=[];candleSeries.setData([]);volS.setData([]);legendFor(null);emaLines.forEach(s=>s.setData([]));rsiS.setData([]);stK.setData([]);stD.setData([]);$('indRow').innerHTML='';$('signals').innerHTML='<div class="signal"><b>Cargando…</b><p>Descargando velas.</p></div>'}
 function refreshIndicators(full){
  const c=state.candles;if(!c.length)return;
  const t=c.map(x=>x.time),cl=c.map(x=>x.close),hi=c.map(x=>x.high),lo=c.map(x=>x.low),I=state.ind,n=cl.length;
@@ -271,6 +296,9 @@ function refreshIndicators(full){
  let rv=null;if(I.rsi.on&&n>I.rsi.period){const r=rsiSeries(cl,I.rsi.period);push(rsiS,r,I.rsi.period);rv=r[n-1]}else if(full)rsiS.setData([]);
  let kv=null,dv=null,kp=null,dp=null;
  if(I.stoch.on&&n>=I.stoch.k+I.stoch.smooth+I.stoch.d){const s=stochSeries(hi,lo,cl,I.stoch.k,I.stoch.smooth,I.stoch.d);push(stK,s.k,0);push(stD,s.d,0);kv=s.k[n-1];dv=s.d[n-1];kp=s.k[n-2];dp=s.d[n-2]}else if(full){stK.setData([]);stD.setData([])}
+ const vc=x=>({time:x.time,value:x.volume||0,color:x.close>=x.open?'rgba(45,212,160,.35)':'rgba(255,101,122,.35)'});
+ if(full)volS.setData(c.map(vc));else volS.update(vc(c[n-1]));
+ if(!hovering)legendLast();
  renderIndicatorRow(emaVals,rv,kv,dv);renderSignals(emaVals,rv,kv,dv,kp,dp);
 }
 function renderIndicatorRow(emaVals,rv,kv,dv){
@@ -293,10 +321,13 @@ function renderSignals(emaVals,rv,kv,dv,kp,dp){
 }
 
 /* ---------- paneles de mercado ---------- */
+let lastPx=null,lastPxSym=null;
+function flash(p){const el=$('price');if(lastPxSym===state.symbol&&lastPx!==null&&p!==lastPx){el.classList.remove('flash-up','flash-down');void el.offsetWidth;el.classList.add(p>lastPx?'flash-up':'flash-down')}lastPx=p;lastPxSym=state.symbol;document.title=fmt(p)+' · '+state.symbol.replace('USDT','')+' — NEXUS AI'}
+let watchQueued=false;function scheduleWatch(){if(watchQueued)return;watchQueued=true;requestAnimationFrame(()=>{watchQueued=false;renderWatch()})}
 function renderMetrics(){
  const t=ticks[state.symbol];
  if(!t){$('price').textContent='—';$('change24').textContent='—';$('change24').className='metric';$('volume24').textContent='—';$('range24').textContent='—';$('priceChange').textContent='Esperando datos';return}
- $('price').textContent=fmt(t.c);$('priceChange').textContent='Último precio negociado';
+ $('price').textContent=fmt(t.c);flash(t.c);$('priceChange').textContent='Último precio negociado';
  $('change24').textContent=pct(t.pct);$('change24').className='metric '+cls(t.pct);
  $('volume24').textContent=compact(t.q);$('range24').textContent=fmt(t.l)+' · '+fmt(t.h);
 }
@@ -306,26 +337,26 @@ function renderWatch(){
 }
 function onKline(e){
  const k=JSON.parse(e.data).k;if(!k||k.s!==state.symbol||k.i!==state.interval)return;
- const c={time:Math.floor(k.t/1000),open:+k.o,high:+k.h,low:+k.l,close:+k.c},arr=state.candles,last=arr[arr.length-1];
- if(last&&last.time===c.time)arr[arr.length-1]=c;else if(!last||c.time>last.time){arr.push(c);if(arr.length>500)arr.shift()}else return;
+ const c={time:Math.floor(k.t/1000),open:+k.o,high:+k.h,low:+k.l,close:+k.c,volume:+k.v},arr=state.candles,last=arr[arr.length-1];
+ if(last&&last.time===c.time)arr[arr.length-1]=c;else if(!last||c.time>last.time){arr.push(c);if(arr.length>5000)arr.shift()}else return;
  candleSeries.update(c);refreshIndicators(false);
 }
 function onTicker(e){
  const m=JSON.parse(e.data),d=m.data||m;if(!d||!d.s)return;const c=+d.c,o=+d.o;
  ticks[d.s]={c,pct:o?(c-o)/o*100:0,q:+d.q,h:+d.h,l:+d.l};
- renderWatch();if(d.s===state.symbol)renderMetrics();checkAlerts(d.s,c);
+ lastTick=Date.now();scheduleWatch();if(d.s===state.symbol)renderMetrics();checkAlerts(d.s,c);
 }
 
 /* ---------- flujo principal: cambiar moneda / intervalo ---------- */
 function closeStreams(){if(socket)socket.close();if(tickerSocket)tickerSocket.close();socket=tickerSocket=null}
 async function start(){
  const run=++runId,sym=state.symbol,iv=state.interval;
- closeStreams();setStatus('loading','Conectando…');clearChart();renderMetrics();renderWatch();
+ lastTick=Date.now();loadArmed=false;noMore=false;loadingMore=false;hovering=false;closeStreams();setStatus('loading','Conectando…');clearChart();renderMetrics();renderWatch();
  $('chartTitle').textContent=sym+' · Velas '+iv;$('alertSym').textContent=sym;$('btSymLabel').textContent=sym;
  try{
   const raw=await fetchKlines(sym,iv,500);if(run!==runId)return;
   state.candles=raw.map(toCandle);if(state.candles.length)applyPrecision(state.candles[state.candles.length-1].close);
-  candleSeries.setData(state.candles);refreshIndicators(true);resetView();
+  candleSeries.setData(state.candles);refreshIndicators(true);resetView();setTimeout(()=>{if(run===runId)loadArmed=true},800);
  }catch(e){if(run!==runId)return;setStatus('err','Sin histórico');toast(e.message,'err')}
  if(run!==runId)return;
  socket=openStream(`/ws/${sym.toLowerCase()}@kline_${iv}`,onKline,run,setStatus);
@@ -334,9 +365,13 @@ async function start(){
 function selectSymbol(sym){if(!SYMBOLS.includes(sym)||sym===state.symbol)return;state.symbol=sym;$('symbol').value=sym;store.set('symbol',sym);start()}
 
 /* ---------- alertas locales ---------- */
+let audioCtx=null;
+function askNotify(){try{if('Notification' in window&&Notification.permission==='default')Notification.requestPermission();const AC=window.AudioContext||window.webkitAudioContext;if(!audioCtx&&AC)audioCtx=new AC()}catch(e){}}
+function beep(){try{if(!audioCtx)return;if(audioCtx.state==='suspended')audioCtx.resume();const o=audioCtx.createOscillator(),g=audioCtx.createGain(),t=audioCtx.currentTime;o.frequency.value=880;g.gain.setValueAtTime(.15,t);g.gain.exponentialRampToValueAtTime(.0001,t+.5);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(t+.5)}catch(e){}}
+function notifyAlert(msg){toast(msg);beep();try{if('Notification' in window&&Notification.permission==='granted'&&document.hidden)new Notification('NEXUS AI',{body:msg})}catch(e){}}
 function saveAlerts(){store.set('alerts',alerts)}
 function renderAlerts(){
- $('alertList').innerHTML=alerts.length?alerts.map(a=>`<div class="alert-item${a.active?'':' done'}"><span>${a.symbol.replace('USDT','')} ${a.condition==='above'?'↑':'↓'} ${fmt(a.target)} · ${a.active?'activa':'disparada'}</span><button data-del="${a.id}" aria-label="Eliminar">×</button></div>`).join(''):'No hay alertas configuradas.';
+ $('alertList').innerHTML=alerts.length?alerts.map(a=>`<div class="alert-item${a.active?'':' done'}"><span>${a.symbol.replace('USDT','')} ${a.condition==='above'?'↑':'↓'} ${fmt(a.target)} · ${a.active?'activa':'disparada'}</span><button data-del="${a.id}" aria-label="Eliminar">×</button></div>`).join('')+(alerts.some(a=>!a.active)?'<button data-clear style="margin-top:6px;padding:4px 10px;font-size:11px">Borrar disparadas</button>':''):'No hay alertas configuradas.';
 }
 function condMet(cond,target,price){return cond==='above'?price>=target:price<=target}
 function addAlert(){
@@ -344,11 +379,11 @@ function addAlert(){
  if(!(target>0))return toast('Ingresá un precio objetivo válido.','err');
  if(!t)return toast('Esperando el precio actual; probá en unos segundos.','err');
  if(condMet(cond,target,t.c))return toast('Esa condición ya se cumple con el precio actual ('+fmt(t.c)+').','err');
- alerts.push({id:Date.now(),symbol:state.symbol,condition:cond,target,active:true});saveAlerts();renderAlerts();$('target').value='';toast('Alerta creada.');
+ askNotify();alerts.push({id:Date.now(),symbol:state.symbol,condition:cond,target,active:true});saveAlerts();renderAlerts();$('target').value='';toast('Alerta creada.');
 }
 function checkAlerts(sym,price){
  let changed=false;
- for(const a of alerts){if(a.active&&a.symbol===sym&&condMet(a.condition,a.target,price)){a.active=false;changed=true;toast(`${sym} ${a.condition==='above'?'superó':'cayó por debajo de'} ${fmt(a.target)} (precio ${fmt(price)})`)}}
+ for(const a of alerts){if(a.active&&a.symbol===sym&&condMet(a.condition,a.target,price)){a.active=false;changed=true;notifyAlert(`${sym} ${a.condition==='above'?'superó':'cayó por debajo de'} ${fmt(a.target)} (precio ${fmt(price)})`)}}
  if(changed){saveAlerts();renderAlerts()}
 }
 
@@ -368,14 +403,17 @@ function renderBacktest(r,segs,meta){
  if(btChart){btChart.remove();btChart=null}
  const el=$('btChart');btChart=LightweightCharts.createChart(el,{width:el.clientWidth||600,height:260,layout:{background:{color:'transparent'},textColor:'#8fa0b8'},grid:{vertLines:{color:'#162235'},horzLines:{color:'#162235'}},rightPriceScale:{borderColor:'#202d40'},timeScale:{borderColor:'#202d40',timeVisible:false}});
  const a=btChart.addLineSeries({color:'#69a7ff',lineWidth:2,priceLineVisible:false}),b=btChart.addLineSeries({color:'#f6c66a',lineWidth:2,priceLineVisible:false});
- a.setData(r.times.map((t,i)=>({time:t,value:r.curve[i]})));b.setData(r.times.map((t,i)=>({time:t,value:r.bhCurve[i]})));btChart.timeScale().fitContent();
+ a.setData(r.times.map((t,i)=>({time:t,value:r.curve[i]})));b.setData(r.times.map((t,i)=>({time:t,value:r.bhCurve[i]})));btChart.timeScale().fitContent();new ResizeObserver(()=>{if(btChart&&el.clientWidth>0)btChart.applyOptions({width:el.clientWidth})}).observe(el);
 }
+const BT_IDS=['btInterval','btCandles','btFast','btSlow','btFee','btSlip'];
+function restoreBt(){const b=store.get('bt',null);if(!b||typeof b!=='object')return;BT_IDS.forEach(id=>{const el=$(id),v=b[id];if(v==null)return;if(el.tagName==='SELECT'){if([...el.options].some(o=>o.value===String(v)))el.value=String(v)}else if(Number.isFinite(+v)&&v!=='')el.value=v})}
+function saveBt(){const b={};BT_IDS.forEach(id=>b[id]=$(id).value);store.set('bt',b)}
 async function runBacktest(){
  const out=$('btOut'),btn=$('btRun');
  const fast=+$('btFast').value,slow=+$('btSlow').value,fee=+$('btFee').value,slip=+$('btSlip').value,iv=$('btInterval').value,total=+$('btCandles').value,sym=state.symbol;
  if(![fast,slow,fee,slip].every(Number.isFinite)||fee<0||slip<0||fee>100||slip>100){out.innerHTML='<div class="verdict down">Revisá los valores: comisión y slippage deben estar entre 0 y 100 bps.</div>';return}
  if(fast<2||slow<=fast){out.innerHTML='<div class="verdict down">La EMA rápida debe ser mayor o igual a 2 y menor que la lenta.</div>';return}
- btn.disabled=true;out.innerHTML='<div class="sub" style="margin-top:14px">Descargando histórico…</div>';
+ saveBt();btn.disabled=true;out.innerHTML='<div class="sub" style="margin-top:14px">Descargando histórico…</div>';
  try{
   const raw=await fetchHistory(sym,iv,total,(n,t)=>{out.innerHTML=`<div class="sub" style="margin-top:14px">Descargando histórico… ${n}/${t} velas</div>`});
   const c=raw.map(toCandle),ppy=525600/INTERVAL_MIN[iv];
@@ -387,7 +425,7 @@ async function runBacktest(){
 }
 
 /* ---------- pestañas y eventos ---------- */
-function showTab(name){
+function showTab(name){store.set('tab',name);
  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
  $('tab-market').hidden=name!=='market';$('tab-bt').hidden=name!=='bt';$('marketControls').hidden=name!=='market';
  if(name==='market')setTimeout(resizeChart,0);
@@ -404,9 +442,12 @@ function init(){
  $('watchlist').addEventListener('click',e=>{const r=e.target.closest&&e.target.closest('[data-sym]');if(r)selectSymbol(r.dataset.sym)});
  $('alertList').addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('[data-del]');if(b){alerts=alerts.filter(a=>String(a.id)!==b.dataset.del);saveAlerts();renderAlerts()}});
  $('addAlert').addEventListener('click',addAlert);
- $('btRun').addEventListener('click',runBacktest);
+ $('btRun').addEventListener('click',runBacktest);restoreBt();
+ $('alertList').addEventListener('click',e=>{if(e.target.closest&&e.target.closest('[data-clear]')){alerts=alerts.filter(a=>a.active);saveAlerts();renderAlerts()}});
+ let rz;window.addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>{if(chart)layoutChart()},150)});
+ const alive=()=>{if(!document.hidden&&tickerSocket&&Date.now()-lastTick>25000)start()};setInterval(alive,10000);document.addEventListener('visibilitychange',alive);
  if(typeof LightweightCharts==='undefined'){setStatus('err','No cargó la librería del gráfico');toast('No se pudo cargar la librería del gráfico. Revisá tu conexión y recargá la página.','err');return}
- initChart();fillSettingsUI();applyIndicatorUI();renderAlerts();start();
+ initChart();fillSettingsUI();applyIndicatorUI();renderAlerts();start();showTab(store.get('tab')==='bt'?'bt':'market');
 }
 init();
 </script>
